@@ -1,0 +1,921 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Good Enough IR Sensor Model: DRI, Noise, Drift, and Mission Utility</title>
+  <style>
+    :root {
+      --bg: #f5f7f4;
+      --panel: #ffffff;
+      --ink: #1d2522;
+      --muted: #64736d;
+      --line: #d7ded8;
+      --accent: #236b5d;
+      --accent-2: #b45d34;
+      --accent-3: #315f96;
+      --warn: #a66b14;
+      --bad: #a33d3d;
+      --good: #287b47;
+      --shadow: 0 12px 32px rgba(29, 37, 34, 0.08);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; background: var(--bg); color: var(--ink); }
+    header { background: #182522; color: #f7fbf8; border-bottom: 1px solid var(--line); }
+    .mast { width: min(1680px, 100%); margin: 0 auto; padding: 22px 28px 20px; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 18px; align-items: end; }
+    h1 { margin: 0; font-size: clamp(24px, 3vw, 40px); font-weight: 780; line-height: 1.08; letter-spacing: 0; }
+    .subhead { margin: 10px 0 0; color: #cbd8d1; max-width: 940px; font-size: 15px; line-height: 1.45; }
+    .header-actions, .small-actions, .preset-row { display: flex; gap: 10px; flex-wrap: wrap; }
+    .header-actions { justify-content: flex-end; }
+    button { appearance: none; border: 1px solid var(--line); background: var(--panel); color: var(--ink); border-radius: 6px; min-height: 38px; padding: 8px 12px; font: inherit; font-size: 13px; font-weight: 700; cursor: pointer; }
+    button:hover { border-color: #aebbb3; background: #f9fbf9; }
+    button.primary { border-color: #1d5b4f; background: var(--accent); color: #fff; }
+    button.primary:hover { background: #1f6155; }
+    button.ghost { background: transparent; color: #e8f0ec; border-color: #50635b; }
+    button.ghost:hover { background: rgba(255,255,255,0.08); }
+    .preset-row button { flex: 1 1 160px; text-align: left; }
+
+    main { width: min(1680px, 100%); margin: 0 auto; padding: 18px 20px 30px; display: grid; grid-template-columns: 410px minmax(0, 1fr); gap: 18px; }
+    aside, section.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: var(--shadow); }
+    aside { align-self: start; position: sticky; top: 12px; max-height: calc(100vh - 24px); overflow: auto; }
+    .tabs { display: flex; padding: 10px; gap: 6px; border-bottom: 1px solid var(--line); background: #f8faf8; position: sticky; top: 0; z-index: 2; }
+    .tab { flex: 1; min-width: 0; padding: 8px 7px; border-radius: 6px; border: 1px solid transparent; color: var(--muted); background: transparent; font-size: 12px; }
+    .tab.active { background: #fff; border-color: var(--line); color: var(--ink); box-shadow: 0 2px 8px rgba(29, 37, 34, 0.06); }
+    .tab-panel { display: none; padding: 14px; }
+    .tab-panel.active { display: block; }
+
+    fieldset { border: 0; padding: 0; margin: 0 0 18px; }
+    legend { font-size: 13px; font-weight: 800; margin: 0 0 10px; color: #26342f; }
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    label { display: grid; gap: 5px; font-size: 12px; font-weight: 700; color: #384741; }
+    input, select, textarea { width: 100%; border: 1px solid var(--line); border-radius: 6px; padding: 8px 9px; min-height: 36px; font: inherit; font-size: 13px; color: var(--ink); background: #fff; }
+    input[type="checkbox"] { width: 16px; height: 16px; min-height: 16px; padding: 0; }
+    .check-row { display: grid; grid-template-columns: 18px minmax(0, 1fr); gap: 8px; align-items: start; padding: 8px 0 0; }
+    textarea { min-height: 92px; resize: vertical; line-height: 1.35; }
+    .hint { color: var(--muted); font-size: 11px; font-weight: 500; line-height: 1.35; }
+    .warning { min-height: 18px; color: var(--warn); font-size: 12px; line-height: 1.35; }
+    .error { min-height: 18px; color: var(--bad); font-size: 12px; line-height: 1.35; }
+
+    .content { display: grid; gap: 18px; }
+    .panel { padding: 18px; }
+    .panel h2 { margin: 0 0 12px; font-size: 18px; letter-spacing: 0; }
+    .cards, .sensitivity-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+    .sensitivity-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+    .card, .mini-card { border: 1px solid var(--line); border-radius: 8px; background: #fff; padding: 13px; min-height: 102px; display: grid; align-content: space-between; gap: 8px; }
+    .mini-card { min-height: 94px; }
+    .label, .card .label, .mini-card .label { color: var(--muted); font-size: 12px; font-weight: 700; line-height: 1.25; }
+    .value, .card .value, .mini-card .value { font-size: clamp(20px, 2vw, 30px); font-weight: 800; line-height: 1; color: #17221f; }
+    .mini-card .value { font-size: clamp(18px, 1.7vw, 25px); }
+    .detail, .card .detail, .mini-card .detail { color: var(--muted); font-size: 12px; line-height: 1.3; }
+
+    .status { border-radius: 8px; padding: 14px 16px; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 12px; align-items: center; border: 1px solid var(--line); background: #f9fbfa; }
+    .status-dot { width: 18px; height: 18px; border-radius: 50%; background: var(--good); box-shadow: 0 0 0 5px rgba(40, 123, 71, 0.14); }
+    .status.fail .status-dot { background: var(--bad); box-shadow: 0 0 0 5px rgba(163, 61, 61, 0.14); }
+    .status.warn .status-dot { background: var(--warn); box-shadow: 0 0 0 5px rgba(166, 107, 20, 0.14); }
+    .status strong { display: block; font-size: 16px; margin-bottom: 2px; }
+    .status span { color: var(--muted); font-size: 13px; line-height: 1.4; }
+
+    .chart-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+    .chart-card { border: 1px solid var(--line); border-radius: 8px; background: #fff; padding: 13px; min-height: 330px; }
+    .chart-title { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
+    .chart-title h3 { margin: 0; font-size: 14px; line-height: 1.2; }
+    .legend { display: flex; gap: 9px; flex-wrap: wrap; font-size: 11px; color: var(--muted); align-items: center; }
+    .key { display: inline-flex; align-items: center; gap: 4px; }
+    .swatch { width: 13px; height: 3px; border-radius: 2px; background: var(--accent); display: inline-block; }
+    canvas { display: block; width: 100%; height: 260px; border-radius: 6px; background: #fbfcfb; }
+    .wide { grid-column: 1 / -1; min-height: 370px; }
+    .wide canvas { height: 290px; }
+
+    .tables { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; overflow: hidden; border-radius: 8px; border: 1px solid var(--line); }
+    th, td { padding: 10px 11px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+    th { background: #f2f6f3; color: #394940; font-size: 12px; }
+    tr:last-child td { border-bottom: 0; }
+    td:last-child, th:last-child { text-align: right; }
+    .note-box { border: 1px solid #cfddd4; background: #f6faf7; border-radius: 8px; padding: 14px; color: #33433d; font-size: 13px; line-height: 1.5; }
+    .physical-list { margin: 0; padding-left: 20px; color: #33433d; font-size: 13px; line-height: 1.5; }
+    .physical-list li { margin: 0 0 8px; }
+    .physical-list li:last-child { margin-bottom: 0; }
+    .caveats { columns: 2; column-gap: 34px; padding-left: 18px; margin: 0; color: #33433d; font-size: 13px; line-height: 1.48; }
+    .caveats li { break-inside: avoid; margin: 0 0 8px; }
+    .import-row { display: grid; gap: 8px; }
+
+    @media (max-width: 1280px) {
+      main { grid-template-columns: 1fr; }
+      aside { position: static; max-height: none; }
+      .cards, .sensitivity-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+    @media (max-width: 760px) {
+      .mast { grid-template-columns: 1fr; padding: 18px 16px; }
+      .header-actions { justify-content: flex-start; }
+      main { padding: 12px; }
+      .grid-2, .chart-grid, .tables, .cards, .sensitivity-grid { grid-template-columns: 1fr; }
+      .caveats { columns: 1; }
+      .tabs { overflow-x: auto; }
+      .tab { min-width: 88px; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="mast">
+      <div>
+        <h1>Good Enough IR Sensor Model: DRI, Noise, Drift, and Mission Utility</h1>
+        <p class="subhead">A transparent, editable engineering dashboard for exploring whether a low-cost infrared sensor remains useful enough for detection, recognition, identification, tracking, or machine decisions over a mission interval.</p>
+      </div>
+      <div class="header-actions">
+        <button class="ghost" id="resetBtn" type="button">Reset defaults</button>
+        <button class="primary" id="exportBtn" type="button">Export assumptions as JSON</button>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <aside aria-label="Input controls">
+      <div class="tabs" role="tablist" aria-label="Input categories">
+        <button class="tab active" type="button" data-tab="sensor">Sensor</button>
+        <button class="tab" type="button" data-tab="optics">Optics</button>
+        <button class="tab" type="button" data-tab="mission">Target</button>
+        <button class="tab" type="button" data-tab="io">JSON</button>
+      </div>
+
+      <div class="tab-panel active" id="tab-sensor">
+        <fieldset>
+          <legend>Sensor / Detector</legend>
+          <div class="grid-2">
+            <label>Pixel pitch, microns<input id="pixelPitchUm" type="number" min="1" step="0.1"></label>
+            <label>Array width, pixels<input id="arrayWidth" type="number" min="1" step="1"></label>
+            <label>Array height, pixels<input id="arrayHeight" type="number" min="1" step="1"></label>
+            <label>NETD initial, mK<input id="netdInitialMk" type="number" min="0.1" step="1"></label>
+            <label>Residual FPN after NUC, mK<input id="residualFpnMk" type="number" min="0" step="1"></label>
+            <label>Drift coefficient, mK<input id="driftCoeffMk" type="number" min="0" step="1"></label>
+            <label>Drift model type
+              <select id="driftModel">
+                <option value="sqrt">sqrt(time)</option>
+                <option value="linear">linear</option>
+                <option value="log">logarithmic</option>
+                <option value="oneOverF">1/f-inspired heuristic</option>
+                <option value="measuredTable">measured table</option>
+              </select>
+            </label>
+            <label>1/f knee frequency, Hz<input id="kneeHz" type="number" min="0" step="0.01"></label>
+            <label>Low-frequency observation time, seconds<input id="lowFreqObservationS" type="number" min="0" step="1"></label>
+            <label>High-frequency cutoff / frame bandwidth, Hz<input id="highFreqCutoffHz" type="number" min="0" step="0.1"></label>
+            <label>1/f strength scale, mK<input id="oneOverFStrengthMk" type="number" min="0" step="1"></label>
+            <label>Frame rate, Hz<input id="frameRateHz" type="number" min="0.1" step="0.1"></label>
+            <label>Frames averaged<input id="framesAveraged" type="number" min="1" step="1"></label>
+          </div>
+          <p class="hint">For 1/f-inspired drift: drift = strength * sqrt(ln(1 + kneeHz * timeSeconds)). Observation time and bandwidth are documented assumptions for vendor discussion; the heuristic uses knee, time, and strength unless measured PSD data are available.</p>
+          <label style="margin-top:10px;">Measured drift table, seconds,mK
+            <textarea id="measuredDriftTable" spellcheck="false"></textarea>
+          </label>
+          <div class="warning" id="driftWarning" aria-live="polite"></div>
+        </fieldset>
+        <fieldset>
+          <legend>Documentation Fields</legend>
+          <label>Responsivity, optional / informational<input id="responsivity" type="text" placeholder="e.g., 1.5e5 V/W, vendor TBD"></label>
+          <label style="margin-top:10px;">Notes for assumed / measured / vendor values<textarea id="notes"></textarea></label>
+        </fieldset>
+      </div>
+
+      <div class="tab-panel" id="tab-optics">
+        <fieldset>
+          <legend>Optics</legend>
+          <div class="grid-2">
+            <label>Focal length, mm<input id="focalLengthMm" type="number" min="0.1" step="0.1"></label>
+            <label>F-number<input id="fNumber" type="number" min="0.1" step="0.1"></label>
+            <label>Optical transmission, 0-1<input id="opticalTransmission" type="number" min="0" max="1" step="0.01"></label>
+          </div>
+          <label class="check-row"><input id="applyOpticalTransmission" type="checkbox"><span>Apply optical transmission to signal</span></label>
+          <p class="hint">FOV is calculated from focal length, pixel pitch, and array size. Aperture diameter is focal length divided by f-number.</p>
+        </fieldset>
+      </div>
+
+      <div class="tab-panel" id="tab-mission">
+        <fieldset>
+          <legend>Scenario Presets</legend>
+          <div class="preset-row">
+            <button type="button" data-preset="highContrast">High contrast terminal target</button>
+            <button type="button" data-preset="lowContrast">Low contrast ISR target</button>
+            <button type="button" data-preset="shortMission">Short mission / attritable</button>
+            <button type="button" data-preset="longDwell">Long dwell observation</button>
+          </div>
+        </fieldset>
+        <fieldset>
+          <legend>Target / Scene / Mission</legend>
+          <div class="grid-2">
+            <label>Target type<select id="targetType"><option value="human">human</option><option value="smallVehicle">small vehicle</option><option value="largeVehicle">large vehicle</option><option value="custom">custom</option></select></label>
+            <label>Critical dimension<select id="criticalDimension"><option value="height">height</option><option value="width">width</option></select></label>
+            <label>Target width, meters<input id="targetWidthM" type="number" min="0.01" step="0.01"></label>
+            <label>Target height, meters<input id="targetHeightM" type="number" min="0.01" step="0.01"></label>
+            <label>Apparent delta-T, K<input id="targetDeltaTK" type="number" min="0" step="0.1"></label>
+            <label>Atmospheric transmission, 0-1<input id="atmosphericTransmission" type="number" min="0" max="1" step="0.01"></label>
+            <label>Mission duration, seconds<input id="missionDurationS" type="number" min="1" step="1"></label>
+            <label>Time since NUC, seconds<input id="timeSinceNucS" type="number" min="0" step="1"></label>
+            <label>Required SNR threshold<input id="snrThreshold" type="number" min="0.1" step="0.1"></label>
+            <label>Tracking jitter threshold, pixels<input id="trackingJitterPx" type="number" min="0.01" step="0.1"></label>
+            <label>Johnson detection, pixels<input id="johnsonDetectionPx" type="number" min="0.1" step="0.1"></label>
+            <label>Johnson recognition, pixels<input id="johnsonRecognitionPx" type="number" min="0.1" step="0.1"></label>
+            <label>Johnson identification, pixels<input id="johnsonIdentificationPx" type="number" min="0.1" step="0.1"></label>
+          </div>
+        </fieldset>
+      </div>
+
+      <div class="tab-panel" id="tab-io">
+        <fieldset>
+          <legend>Import / Export</legend>
+          <div class="import-row">
+            <label>Assumptions JSON<textarea id="jsonBox" spellcheck="false" placeholder="Paste exported assumptions JSON here."></textarea></label>
+            <div class="small-actions">
+              <button type="button" id="importBtn">Import assumptions JSON</button>
+              <button type="button" id="copyBtn">Copy current JSON</button>
+            </div>
+            <div class="error" id="jsonError" aria-live="polite"></div>
+          </div>
+        </fieldset>
+      </div>
+    </aside>
+
+    <div class="content">
+      <section class="panel">
+        <h2>Mission Utility Snapshot</h2>
+        <div class="status" id="missionStatus">
+          <div class="status-dot"></div>
+          <div><strong id="statusTitle">Mission pass</strong><span id="interpretation">Calculating...</span></div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>Calculated Outputs</h2>
+        <div class="cards">
+          <div class="card"><div class="label">IFOV</div><div class="value" id="ifovOut">-</div><div class="detail">mrad per pixel</div></div>
+          <div class="card"><div class="label">FOV H / V</div><div class="value" id="fovOut">-</div><div class="detail">degrees</div></div>
+          <div class="card"><div class="label">Aperture Diameter</div><div class="value" id="apertureOut">-</div><div class="detail">focal length / f-number</div></div>
+          <div class="card"><div class="label">Effective NETD</div><div class="value" id="netdOut">-</div><div class="detail" id="netdDetail">at selected time</div></div>
+          <div class="card"><div class="label">Signal</div><div class="value" id="signalOut">-</div><div class="detail" id="signalDetail">mK apparent signal</div></div>
+          <div class="card"><div class="label">SNR</div><div class="value" id="snrOut">-</div><div class="detail">at selected time since NUC</div></div>
+          <div class="card"><div class="label">Time to SNR Threshold</div><div class="value" id="ttfOut">-</div><div class="detail">selected SNR requirement no longer met</div></div>
+          <div class="card"><div class="label">Max Calibration / NUC Interval</div><div class="value" id="nucOut">-</div><div class="detail">maximum interval before SNR threshold crossing</div></div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>Physical Interpretation</h2>
+        <ul class="physical-list" id="physicalInterpretation">
+          <li>Calculating interpretation...</li>
+        </ul>
+      </section>
+
+      <section class="panel">
+        <h2>What Sets the NUC Interval?</h2>
+        <div class="note-box" id="nucExplanation">Calculating...</div>
+      </section>
+
+      <section class="panel">
+        <h2>Sensitivity: What Would Make This Fail?</h2>
+        <div class="sensitivity-grid">
+          <div class="mini-card"><div class="label">Current SNR Margin</div><div class="value" id="snrMarginOut">-</div><div class="detail">SNR / threshold</div></div>
+          <div class="mini-card"><div class="label">Max Effective NETD</div><div class="value" id="maxNetdOut">-</div><div class="detail">before threshold crossing</div></div>
+          <div class="mini-card"><div class="label">Remaining Drift Allowance</div><div class="value" id="driftAllowanceOut">-</div><div class="detail">approx. at selected time</div></div>
+          <div class="mini-card"><div class="label">Required Delta-T</div><div class="value" id="requiredDeltaTOut">-</div><div class="detail">to meet threshold now</div></div>
+          <div class="mini-card"><div class="label">Mission Drift Coeff.</div><div class="value" id="requiredCoeffOut">-</div><div class="detail">approx. max to survive mission</div></div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>DRI Ranges</h2>
+        <div class="tables">
+          <table aria-label="Nominal and degraded DRI ranges"><thead><tr><th>Task</th><th>Johnson pixels</th><th>Nominal range</th><th>Noise/drift degraded</th></tr></thead><tbody id="driTable"></tbody></table>
+          <table aria-label="Model details"><thead><tr><th>Quantity</th><th>Value</th></tr></thead><tbody id="detailTable"></tbody></table>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>Visualizations</h2>
+        <div class="chart-grid">
+          <div class="chart-card"><div class="chart-title"><h3>Effective NETD vs Time Since NUC</h3><div class="legend"><span class="key"><span class="swatch"></span>NETD</span></div></div><canvas id="netdChart" width="720" height="360"></canvas></div>
+          <div class="chart-card"><div class="chart-title"><h3>SNR vs Time Since NUC</h3><div class="legend"><span class="key"><span class="swatch"></span>SNR</span><span class="key"><span class="swatch" style="background:var(--bad)"></span>SNR threshold</span></div></div><canvas id="snrChart" width="720" height="360"></canvas></div>
+          <div class="chart-card"><div class="chart-title"><h3>SNR Margin vs Time</h3><div class="legend"><span class="key"><span class="swatch"></span>margin</span><span class="key"><span class="swatch" style="background:var(--bad)"></span>margin = 1</span></div></div><canvas id="marginChart" width="720" height="360"></canvas></div>
+          <div class="chart-card"><div class="chart-title"><h3>DRI Range vs Time Since NUC</h3><div class="legend"><span class="key"><span class="swatch" style="background:var(--good)"></span>D</span><span class="key"><span class="swatch" style="background:var(--accent-2)"></span>R</span><span class="key"><span class="swatch" style="background:var(--accent-3)"></span>I</span></div></div><canvas id="rangeChart" width="720" height="360"></canvas></div>
+          <div class="chart-card"><div class="chart-title"><h3>Pixels-on-Target vs Range</h3><div class="legend"><span class="key"><span class="swatch"></span>pixels</span></div></div><canvas id="pixelsChart" width="720" height="360"></canvas></div>
+          <div class="chart-card wide"><div class="chart-title"><h3>Good-Enough Mission Map: Range vs Time</h3><div class="legend"><span class="key"><span class="swatch" style="background:rgba(40,123,71,.85)"></span>passes detection</span><span class="key"><span class="swatch" style="background:rgba(163,61,61,.78)"></span>fails detection</span></div></div><canvas id="mapChart" width="1480" height="380"></canvas></div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>Assumptions and Caveats</h2>
+        <div class="note-box"><strong>Noise-degraded DRI range is a heuristic:</strong> range_effective = range_nominal * min(1, sqrt(SNR / SNR_threshold)). It is intended for sensitivity exploration and discussion, not formal performance certification.</div>
+        <ul class="caveats" style="margin-top:14px;">
+          <li>This is an exploratory engineering model, not a validated range prediction tool.</li>
+          <li>Johnson criteria are approximate and task-dependent.</li>
+          <li>NETD, FPN, and drift terms are simplified and treated as independent RMS contributors.</li>
+          <li>Range degradation is heuristic and not a validated Johnson/SNR probability model.</li>
+          <li>1/f noise is modeled heuristically unless measured PSD data are available.</li>
+          <li>True 1/f impact requires measured noise PSD, correction strategy, bandwidth, and temporal/spatial processing assumptions.</li>
+          <li>Drift may appear as offset drift, gain drift, row/column drift, or spatially correlated clutter.</li>
+          <li>Atmospheric transmission, target contrast, optics, image processing, and algorithm performance can dominate real-world results.</li>
+          <li>This tool is intended to identify measurement requirements and viability regions, not certify performance.</li>
+          <li>Tracking jitter is approximated as 1 / SNR in pixels, for quick mission-utility screening only.</li>
+        </ul>
+      </section>
+    </div>
+  </main>
+
+  <script>
+    const defaults = {
+      pixelPitchUm: 15, arrayWidth: 640, arrayHeight: 512, netdInitialMk: 80, residualFpnMk: 40,
+      driftModel: "sqrt", driftCoeffMk: 20, kneeHz: 0.1, lowFreqObservationS: 300,
+      highFreqCutoffHz: 15, oneOverFStrengthMk: 35, frameRateHz: 30, framesAveraged: 1,
+      measuredDriftTable: "0,0\n60,20\n300,70\n900,140",
+      responsivity: "",
+      notes: "Defaults represent an illustrative low-cost uncooled or lead-salt photoconductive sensor discussion case. Replace with measured values whenever available.",
+      focalLengthMm: 25, fNumber: 1.2, opticalTransmission: 0.8, applyOpticalTransmission: true,
+      targetType: "human", targetWidthM: 0.5, targetHeightM: 1.8, criticalDimension: "height",
+      targetDeltaTK: 2, atmosphericTransmission: 0.8, missionDurationS: 300, timeSinceNucS: 60,
+      snrThreshold: 5, trackingJitterPx: 0.5, johnsonDetectionPx: 1.5, johnsonRecognitionPx: 6,
+      johnsonIdentificationPx: 12
+    };
+
+    const targetPresets = {
+      human: { targetWidthM: 0.5, targetHeightM: 1.8 },
+      smallVehicle: { targetWidthM: 2.0, targetHeightM: 1.6 },
+      largeVehicle: { targetWidthM: 3.0, targetHeightM: 3.0 }
+    };
+
+    const scenarioPresets = {
+      highContrast: { targetDeltaTK: 6, missionDurationS: 120, snrThreshold: 4, residualFpnMk: 30, driftCoeffMk: 12 },
+      lowContrast: { targetDeltaTK: 0.8, missionDurationS: 900, snrThreshold: 6, residualFpnMk: 55, driftCoeffMk: 30 },
+      shortMission: { targetDeltaTK: 3, missionDurationS: 90, snrThreshold: 4, residualFpnMk: 45, driftCoeffMk: 25 },
+      longDwell: { targetDeltaTK: 1.5, missionDurationS: 1800, snrThreshold: 5, residualFpnMk: 35, driftCoeffMk: 15 }
+    };
+
+    const ids = Object.keys(defaults);
+    const $ = (id) => document.getElementById(id);
+    const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+
+    function numberValue(id) {
+      const value = Number($(id)?.value);
+      return Number.isFinite(value) ? value : defaults[id];
+    }
+
+    function getState() {
+      const state = {};
+      ids.forEach((id) => {
+        const el = $(id);
+        if (!el) return;
+        state[id] = el.type === "checkbox" ? el.checked : el.type === "number" ? numberValue(id) : el.value;
+      });
+      state.framesAveraged = Math.max(1, Math.round(state.framesAveraged));
+      state.arrayWidth = Math.max(1, Math.round(state.arrayWidth));
+      state.arrayHeight = Math.max(1, Math.round(state.arrayHeight));
+      state.opticalTransmission = clamp(state.opticalTransmission, 0, 1);
+      state.atmosphericTransmission = clamp(state.atmosphericTransmission, 0, 1);
+      state.timeSinceNucS = Math.max(0, state.timeSinceNucS);
+      state.missionDurationS = Math.max(1, state.missionDurationS);
+      state.snrThreshold = Math.max(0.1, state.snrThreshold);
+      return state;
+    }
+
+    function setState(inputState) {
+      const state = { ...defaults, ...inputState };
+      ids.forEach((id) => {
+        const el = $(id);
+        if (!el) return;
+        if (el.type === "checkbox") el.checked = Boolean(state[id]);
+        else el.value = state[id];
+      });
+      update();
+    }
+
+    function parseMeasuredTable(text) {
+      const rows = String(text || "").split(/\n+/).map(line => line.trim()).filter(Boolean);
+      const points = [];
+      for (const row of rows) {
+        const parts = row.split(/[,\s]+/).filter(Boolean).map(Number);
+        if (parts.length < 2 || !Number.isFinite(parts[0]) || !Number.isFinite(parts[1]) || parts[0] < 0 || parts[1] < 0) {
+          return { points: [], warning: "Measured drift table is invalid. Use rows like 60,20. Falling back to zero measured-table drift." };
+        }
+        points.push({ t: parts[0], d: parts[1] });
+      }
+      points.sort((a, b) => a.t - b.t);
+      for (let i = 1; i < points.length; i++) {
+        if (points[i].t === points[i - 1].t) return { points: [], warning: "Measured drift table has duplicate times. Falling back to zero measured-table drift." };
+        if (points[i].d < points[i - 1].d) return { points: [], warning: "Measured drift table should be nondecreasing with time. Falling back to zero measured-table drift." };
+      }
+      if (!points.length) return { points: [], warning: "Measured table selected but no valid time/drift pairs are available." };
+      return { points, warning: "" };
+    }
+
+    function measuredDriftMk(state, seconds) {
+      const parsed = parseMeasuredTable(state.measuredDriftTable);
+      const pts = parsed.points;
+      if (!pts.length) return 0;
+      if (seconds <= pts[0].t) return pts[0].d;
+      if (seconds >= pts[pts.length - 1].t) return pts[pts.length - 1].d;
+      for (let i = 1; i < pts.length; i++) {
+        if (seconds <= pts[i].t) {
+          const a = pts[i - 1], b = pts[i];
+          const f = (seconds - a.t) / (b.t - a.t);
+          return a.d + f * (b.d - a.d);
+        }
+      }
+      return pts[pts.length - 1].d;
+    }
+
+    function driftBasis(state, seconds) {
+      const minutes = Math.max(0, seconds) / 60;
+      if (state.driftModel === "linear") return minutes;
+      if (state.driftModel === "log") return Math.log10(1 + minutes);
+      if (state.driftModel === "sqrt") return Math.sqrt(minutes);
+      return 0;
+    }
+
+    function driftMk(state, seconds) {
+      const t = Math.max(0, seconds);
+      if (state.driftModel === "measuredTable") return measuredDriftMk(state, t);
+      if (state.driftModel === "oneOverF") {
+        const knee = Math.max(0, state.kneeHz || 0);
+        const strength = Math.max(0, state.oneOverFStrengthMk || 0);
+        return strength * Math.sqrt(Math.max(0, Math.log(1 + knee * t)));
+      }
+      return Math.max(0, state.driftCoeffMk) * driftBasis(state, t);
+    }
+
+    function effectiveNetdMk(state, seconds) {
+      const thermal = Math.pow(Math.max(0, state.netdInitialMk), 2) / Math.max(1, state.framesAveraged);
+      const fpn = Math.pow(Math.max(0, state.residualFpnMk), 2);
+      const drift = Math.pow(driftMk(state, seconds), 2);
+      return Math.sqrt(thermal + fpn + drift);
+    }
+
+    function signalMk(state) {
+      const optical = state.applyOpticalTransmission ? state.opticalTransmission : 1;
+      return state.targetDeltaTK * 1000 * state.atmosphericTransmission * optical;
+    }
+
+    function findTimeToThreshold(state, signal) {
+      const duration = Math.max(1, state.missionDurationS);
+      const threshold = state.snrThreshold;
+      if (signal / effectiveNetdMk(state, 0) < threshold) return 0;
+      let lo = 0, hi = duration;
+      if (signal / effectiveNetdMk(state, duration) >= threshold) return Infinity;
+      for (let i = 0; i < 48; i++) {
+        const mid = (lo + hi) / 2;
+        if (signal / effectiveNetdMk(state, mid) >= threshold) lo = mid; else hi = mid;
+      }
+      return hi;
+    }
+
+    function compute(state) {
+      const pixelPitchM = state.pixelPitchUm * 1e-6;
+      const focalM = state.focalLengthMm * 1e-3;
+      const ifovRad = pixelPitchM / focalM;
+      const sensorWidthM = pixelPitchM * state.arrayWidth;
+      const sensorHeightM = pixelPitchM * state.arrayHeight;
+      const fovH = 2 * Math.atan(sensorWidthM / (2 * focalM)) * 180 / Math.PI;
+      const fovV = 2 * Math.atan(sensorHeightM / (2 * focalM)) * 180 / Math.PI;
+      const apertureMm = state.focalLengthMm / state.fNumber;
+      const criticalM = state.criticalDimension === "width" ? state.targetWidthM : state.targetHeightM;
+      const sig = signalMk(state);
+      const netd = effectiveNetdMk(state, state.timeSinceNucS);
+      const snr = sig / netd;
+      const timeToThreshold = findTimeToThreshold(state, sig);
+      const tasks = [
+        { key: "Detection", px: state.johnsonDetectionPx, color: "#287b47" },
+        { key: "Recognition", px: state.johnsonRecognitionPx, color: "#b45d34" },
+        { key: "Identification", px: state.johnsonIdentificationPx, color: "#315f96" }
+      ].map(task => {
+        const nominal = criticalM / (task.px * ifovRad);
+        const factor = Math.min(1, Math.sqrt(Math.max(0, snr) / state.snrThreshold));
+        return { ...task, nominal, effective: nominal * factor };
+      });
+      return { pixelPitchM, focalM, ifovRad, fovH, fovV, apertureMm, criticalM, signalMk: sig, netd, snr, timeToThreshold, tasks, trackingJitter: snr > 0 ? 1 / snr : Infinity };
+    }
+
+    function sampleSeries(state, n = 240) {
+      const data = compute(state);
+      const points = [];
+      for (let i = 0; i <= n; i++) {
+        const t = state.missionDurationS * i / n;
+        const netd = effectiveNetdMk(state, t);
+        const snr = data.signalMk / netd;
+        points.push({ t, netd, snr, margin: snr / state.snrThreshold, ranges: data.tasks.map(task => task.nominal * Math.min(1, Math.sqrt(Math.max(0, snr) / state.snrThreshold))) });
+      }
+      return { ...data, points };
+    }
+
+    function formatMeters(m) {
+      if (!Number.isFinite(m)) return "-";
+      if (m >= 10000) return (m / 1000).toFixed(1) + " km";
+      if (m >= 1000) return (m / 1000).toFixed(2) + " km";
+      if (m >= 100) return m.toFixed(0) + " m";
+      return m.toFixed(1) + " m";
+    }
+
+    function formatSeconds(s) {
+      if (!Number.isFinite(s)) return "No threshold crossing";
+      if (s <= 0.01) return "0 s";
+      if (s < 60) return s.toFixed(0) + " s";
+      if (s < 3600) return (s / 60).toFixed(1) + " min";
+      return (s / 3600).toFixed(2) + " hr";
+    }
+
+    function pretty(v) {
+      if (!Number.isFinite(v)) return "-";
+      if (Math.abs(v) >= 1000) return (v / 1000).toFixed(1) + "k";
+      if (Math.abs(v) >= 100) return v.toFixed(0);
+      if (Math.abs(v) >= 10) return v.toFixed(1);
+      return v.toFixed(2);
+    }
+
+    function axisScale(values, pad = 0.1) {
+      let max = Math.max(...values.filter(Number.isFinite), 0);
+      if (max <= 0) max = 1;
+      return max * (1 + pad);
+    }
+
+    function prepCanvas(canvas) {
+      const ctx = canvas.getContext("2d");
+      const dpr = window.devicePixelRatio || 1;
+      const rect = canvas.getBoundingClientRect();
+      canvas.width = Math.max(320, Math.round(rect.width * dpr));
+      canvas.height = Math.max(220, Math.round(rect.height * dpr));
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      return { ctx, w: rect.width, h: rect.height };
+    }
+
+    function drawFrame(ctx, w, h, yLabel) {
+      ctx.clearRect(0, 0, w, h);
+      ctx.fillStyle = "#fbfcfb";
+      ctx.fillRect(0, 0, w, h);
+      ctx.strokeStyle = "#d7ded8";
+      ctx.strokeRect(0.5, 0.5, w - 1, h - 1);
+      const m = { l: 64, r: 20, t: 18, b: 46 };
+      ctx.strokeStyle = "#e2e8e3";
+      for (let i = 0; i <= 4; i++) {
+        const y = m.t + (h - m.t - m.b) * i / 4;
+        ctx.beginPath(); ctx.moveTo(m.l, y); ctx.lineTo(w - m.r, y); ctx.stroke();
+      }
+      ctx.fillStyle = "#66736d";
+      ctx.font = "12px Inter, system-ui, sans-serif";
+      ctx.fillText("time since NUC", w / 2 - 42, h - 14);
+      if (yLabel) {
+        ctx.save(); ctx.translate(17, h / 2 + 42); ctx.rotate(-Math.PI / 2); ctx.fillText(yLabel, 0, 0); ctx.restore();
+      }
+      return m;
+    }
+
+    function drawTimeMarkers(ctx, xToPx, y1, y0, state, timeToThreshold) {
+      const markers = [
+        { t: state.timeSinceNucS, color: "#1d2522", label: "selected" },
+        { t: timeToThreshold, color: "#a33d3d", label: "SNR threshold" }
+      ];
+      ctx.font = "10px Inter, system-ui, sans-serif";
+      markers.forEach(marker => {
+        if (!Number.isFinite(marker.t) || marker.t < 0 || marker.t > state.missionDurationS) return;
+        const x = xToPx(marker.t);
+        ctx.strokeStyle = marker.color;
+        ctx.setLineDash([3, 4]);
+        ctx.beginPath(); ctx.moveTo(x, y1); ctx.lineTo(x, y0); ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = marker.color;
+        ctx.save(); ctx.translate(x + 4, y1 + 10); ctx.rotate(-Math.PI / 2); ctx.fillText(marker.label, 0, 0); ctx.restore();
+      });
+    }
+
+    function plotLine(canvas, data, state, getY, color, yMax, yLabel, threshold, thresholdLabel) {
+      const { ctx, w, h } = prepCanvas(canvas);
+      const m = drawFrame(ctx, w, h, yLabel);
+      const x0 = m.l, x1 = w - m.r, y0 = h - m.b, y1 = m.t;
+      const duration = Math.max(1, state.missionDurationS);
+      const xToPx = t => x0 + (t / duration) * (x1 - x0);
+      const yToPx = y => y0 - (y / yMax) * (y0 - y1);
+      ctx.fillStyle = "#66736d";
+      ctx.font = "11px Inter, system-ui, sans-serif";
+      for (let i = 0; i <= 4; i++) {
+        const yv = yMax * (4 - i) / 4;
+        ctx.fillText(pretty(yv), 8, y1 + (y0 - y1) * i / 4 + 4);
+      }
+      ctx.fillText("0", x0 - 4, h - 30);
+      ctx.fillText(formatSeconds(duration), x1 - 74, h - 30);
+      if (Number.isFinite(threshold)) {
+        const ty = yToPx(threshold);
+        ctx.strokeStyle = "#a33d3d";
+        ctx.setLineDash([5, 5]);
+        ctx.beginPath(); ctx.moveTo(x0, ty); ctx.lineTo(x1, ty); ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = "#a33d3d";
+        ctx.fillText(thresholdLabel || "threshold", x0 + 8, ty - 6);
+      }
+      drawTimeMarkers(ctx, xToPx, y1, y0, state, data.timeToThreshold);
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      data.points.forEach((p, i) => {
+        const x = xToPx(p.t), y = yToPx(getY(p));
+        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+      });
+      ctx.stroke();
+    }
+
+    function plotRangeChart(canvas, data, state) {
+      const { ctx, w, h } = prepCanvas(canvas);
+      const m = drawFrame(ctx, w, h, "range");
+      const x0 = m.l, x1 = w - m.r, y0 = h - m.b, y1 = m.t;
+      const maxY = axisScale(data.points.flatMap(p => p.ranges));
+      const xToPx = t => x0 + (t / state.missionDurationS) * (x1 - x0);
+      const yToPx = y => y0 - (y / maxY) * (y0 - y1);
+      ctx.fillStyle = "#66736d"; ctx.font = "11px Inter, system-ui, sans-serif";
+      for (let i = 0; i <= 4; i++) ctx.fillText(formatMeters(maxY * (4 - i) / 4), 8, y1 + (y0 - y1) * i / 4 + 4);
+      ctx.fillText("0", x0 - 4, h - 30); ctx.fillText(formatSeconds(state.missionDurationS), x1 - 74, h - 30);
+      drawTimeMarkers(ctx, xToPx, y1, y0, state, data.timeToThreshold);
+      data.tasks.forEach((task, idx) => {
+        ctx.strokeStyle = task.color; ctx.lineWidth = 2.5; ctx.beginPath();
+        data.points.forEach((p, i) => {
+          const x = xToPx(p.t), y = yToPx(p.ranges[idx]);
+          if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+        });
+        ctx.stroke();
+      });
+    }
+
+    function plotPixels(canvas, data) {
+      const { ctx, w, h } = prepCanvas(canvas);
+      const m = drawFrame(ctx, w, h, "pixels");
+      const x0 = m.l, x1 = w - m.r, y0 = h - m.b, y1 = m.t;
+      const maxRange = Math.max(data.tasks[0].nominal * 1.35, 10);
+      const maxPix = Math.max(data.tasks[2].px * 1.4, 14);
+      const xToPx = r => x0 + (r / maxRange) * (x1 - x0);
+      const yToPx = px => y0 - (px / maxPix) * (y0 - y1);
+      ctx.fillStyle = "#66736d"; ctx.font = "11px Inter, system-ui, sans-serif";
+      for (let i = 0; i <= 4; i++) ctx.fillText((maxPix * (4 - i) / 4).toFixed(1), 18, y1 + (y0 - y1) * i / 4 + 4);
+      ctx.fillText("range", w / 2 - 18, h - 14); ctx.fillText("0", x0 - 4, h - 30); ctx.fillText(formatMeters(maxRange), x1 - 66, h - 30);
+      data.tasks.forEach(task => {
+        const y = yToPx(task.px);
+        ctx.strokeStyle = task.color; ctx.setLineDash([4, 4]); ctx.beginPath(); ctx.moveTo(x0, y); ctx.lineTo(x1, y); ctx.stroke(); ctx.setLineDash([]);
+      });
+      ctx.strokeStyle = "#236b5d"; ctx.lineWidth = 2.5; ctx.beginPath();
+      for (let i = 0; i <= 240; i++) {
+        const r = Math.max(0.1, maxRange * i / 240);
+        const px = data.criticalM / (r * data.ifovRad);
+        const x = xToPx(r), y = yToPx(Math.min(maxPix, px));
+        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+    }
+
+    function plotMissionMap(canvas, data, state) {
+      const { ctx, w, h } = prepCanvas(canvas);
+      const m = { l: 66, r: 20, t: 18, b: 46 };
+      ctx.clearRect(0, 0, w, h); ctx.fillStyle = "#fbfcfb"; ctx.fillRect(0, 0, w, h); ctx.strokeStyle = "#d7ded8"; ctx.strokeRect(0.5, 0.5, w - 1, h - 1);
+      const x0 = m.l, x1 = w - m.r, y0 = h - m.b, y1 = m.t;
+      const maxRange = Math.max(data.tasks[0].nominal * 1.25, 10);
+      for (let ix = 0; ix < 150; ix++) {
+        const t = state.missionDurationS * ix / 149;
+        const snr = data.signalMk / effectiveNetdMk(state, t);
+        for (let iy = 0; iy < 58; iy++) {
+          const range = maxRange * (57 - iy) / 57;
+          const pixels = data.criticalM / Math.max(1e-9, range * data.ifovRad);
+          const pass = snr >= state.snrThreshold && pixels >= state.johnsonDetectionPx;
+          ctx.fillStyle = pass ? "rgba(40,123,71,0.78)" : "rgba(163,61,61,0.62)";
+          ctx.fillRect(x0 + ix * (x1 - x0) / 150, y1 + iy * (y0 - y1) / 58, (x1 - x0) / 150 + 1, (y0 - y1) / 58 + 1);
+        }
+      }
+      const xToPx = t => x0 + (t / state.missionDurationS) * (x1 - x0);
+      drawTimeMarkers(ctx, xToPx, y1, y0, state, data.timeToThreshold);
+      ctx.strokeStyle = "#26342f"; ctx.strokeRect(x0, y1, x1 - x0, y0 - y1);
+      ctx.fillStyle = "#33433d"; ctx.font = "11px Inter, system-ui, sans-serif";
+      for (let i = 0; i <= 4; i++) ctx.fillText(formatMeters(maxRange * (4 - i) / 4), 8, y1 + (y0 - y1) * i / 4 + 4);
+      ctx.fillText("0", x0 - 4, h - 30); ctx.fillText(formatSeconds(state.missionDurationS), x1 - 74, h - 30); ctx.fillText("time since NUC", w / 2 - 42, h - 14);
+      ctx.save(); ctx.translate(17, h / 2 + 28); ctx.rotate(-Math.PI / 2); ctx.fillText("range", 0, 0); ctx.restore();
+    }
+
+    function driftModelName(state) {
+      if (state.driftModel === "oneOverF") return "1/f-inspired heuristic";
+      if (state.driftModel === "measuredTable") return "measured table";
+      return state.driftModel;
+    }
+
+    function maxCoeffForMission(state, maxDrift) {
+      if (!Number.isFinite(maxDrift) || maxDrift < 0) return NaN;
+      if (state.driftModel === "sqrt" || state.driftModel === "linear" || state.driftModel === "log") {
+        const basis = driftBasis(state, state.missionDurationS);
+        return basis > 0 ? maxDrift / basis : Infinity;
+      }
+      if (state.driftModel === "oneOverF") {
+        const denom = Math.sqrt(Math.max(0, Math.log(1 + Math.max(0, state.kneeHz) * state.missionDurationS)));
+        return denom > 0 ? maxDrift / denom : Infinity;
+      }
+      return NaN;
+    }
+
+    function escapeHtml(value) {
+      return String(value).replace(/[&<>"']/g, char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[char]));
+    }
+
+    function physicalInterpretationBullets(state, data, metrics) {
+      const bullets = [];
+      const margin = data.snr / state.snrThreshold;
+      const drift = driftMk(state, state.timeSinceNucS);
+      const white = state.netdInitialMk / Math.sqrt(Math.max(1, state.framesAveraged));
+      const fpn = Math.max(0, state.residualFpnMk);
+      const totalVariance = Math.max(1e-9, white * white + fpn * fpn + drift * drift);
+      const terms = [
+        { name: "white NETD", value: white, share: white * white / totalVariance },
+        { name: "residual FPN", value: fpn, share: fpn * fpn / totalVariance },
+        { name: "drift", value: drift, share: drift * drift / totalVariance }
+      ].sort((a, b) => b.share - a.share);
+      const dominant = terms[0];
+      const passNow = margin >= 1;
+      const passMission = data.timeToThreshold === Infinity || data.timeToThreshold >= state.missionDurationS;
+      const rec = data.tasks.find(task => task.key === "Recognition");
+      const id = data.tasks.find(task => task.key === "Identification");
+      const recFactor = rec ? rec.effective / rec.nominal : 1;
+      const idFactor = id ? id.effective / id.nominal : 1;
+
+      if (!passNow) {
+        bullets.push(`The selected scenario is below the SNR requirement now: margin is ${margin.toFixed(2)}x, with ${data.netd.toFixed(1)} mK effective NETD against ${data.signalMk.toFixed(0)} mK apparent signal.`);
+      } else if (!passMission) {
+        bullets.push(`The scenario is acceptable at the selected time but becomes SNR-limited after about ${formatSeconds(data.timeToThreshold)}; this is a threshold crossing for the mission requirement, not detector failure.`);
+      } else {
+        bullets.push(`The scenario succeeds through the modeled mission because target signal is large enough relative to effective NETD: SNR margin is ${margin.toFixed(2)}x at ${formatSeconds(state.timeSinceNucS)} since NUC.`);
+      }
+
+      if (dominant.name === "drift") {
+        const budgetText = metrics.driftAllowance > 0 ? `remaining drift budget is about ${metrics.driftAllowance.toFixed(1)} mK` : "the drift budget is already exhausted";
+        bullets.push(`The dominant noise term is drift (${drift.toFixed(1)} mK at the selected time); ${budgetText}. Drift interpretation is heuristic unless supported by measured temporal PSD or drift data.`);
+      } else if (dominant.name === "residual FPN") {
+        bullets.push(`Residual FPN is the largest modeled contributor (${fpn.toFixed(1)} mK), so utility is likely sensitive to NUC quality, scene-based correction, and spatial/row-column artifacts.`);
+      } else {
+        bullets.push(`White NETD remains the largest modeled term after frame averaging (${white.toFixed(1)} mK), so added averaging or detector NETD improvements would move the SNR margin most directly.`);
+      }
+
+      if (recFactor > 0.95 && idFactor > 0.95 && passNow) {
+        bullets.push("Recognition and identification ranges are mostly Johnson-limited in this scenario; the SNR/drift heuristic is not pulling the nominal DRI ranges inward much.");
+      } else if (recFactor > 0.95 && passNow) {
+        bullets.push("Recognition range is mainly Johnson-limited, while identification is closer to the SNR/drift boundary.");
+      } else {
+        bullets.push(`DRI range is being pulled inward by the SNR/drift heuristic; recognition range is at ${(recFactor * 100).toFixed(0)}% of its nominal Johnson range.`);
+      }
+
+      if (data.trackingJitter > state.trackingJitterPx) {
+        bullets.push(`Tracking is a caution item: the simplified centroid jitter estimate is ${data.trackingJitter.toFixed(3)} px versus a ${state.trackingJitterPx.toFixed(3)} px threshold.`);
+      } else if (dominant.name === "drift" || dominant.name === "residual FPN") {
+        bullets.push(`Tracking jitter is under the selected limit, but practical tracking may be limited more by drift/FPN structure than by frame-to-frame white noise.`);
+      } else {
+        bullets.push(`Tracking jitter is under the selected limit (${data.trackingJitter.toFixed(3)} px estimated), with the usual caveat that this is a simple 1/SNR proxy.`);
+      }
+
+      if (state.missionDurationS <= 180 && passNow) {
+        bullets.push("This looks more credible as a short-duration or terminal-use case than as a long-dwell surveillance case, pending measured drift and correction data.");
+      } else if (state.missionDurationS >= 900 && (!passMission || margin < 1.4 || dominant.name === "drift")) {
+        bullets.push("For long-dwell ISR, the scenario is marginal unless drift/FPN stability and correction strategy are demonstrated with representative measurements.");
+      } else {
+        bullets.push("The interpretation is a screening result: useful for identifying measurement priorities and viability regions, not a validated performance prediction.");
+      }
+
+      if (state.driftModel === "oneOverF") {
+        bullets.push("The 1/f result should be treated as exploratory; true low-frequency impact depends on measured PSD, correction cadence, bandwidth, and temporal/spatial processing.");
+      } else if (state.driftModel === "measuredTable") {
+        bullets.push("The measured-table drift result is only as representative as the pasted test data, operating temperature, NUC method, and scene conditions.");
+      }
+
+      return bullets.slice(0, 6);
+    }
+
+    function update() {
+      const state = getState();
+      const data = sampleSeries(state);
+      const tableStatus = parseMeasuredTable(state.measuredDriftTable);
+      $("driftWarning").textContent = state.driftModel === "measuredTable" ? tableStatus.warning : state.driftModel === "oneOverF" ? "1/f-inspired drift is heuristic until measured PSD data are available." : "";
+
+      $("ifovOut").textContent = (data.ifovRad * 1000).toFixed(3);
+      $("fovOut").textContent = data.fovH.toFixed(1) + " / " + data.fovV.toFixed(1);
+      $("apertureOut").textContent = data.apertureMm.toFixed(1) + " mm";
+      $("netdOut").textContent = data.netd.toFixed(1) + " mK";
+      $("netdDetail").textContent = "initial " + state.netdInitialMk.toFixed(0) + " mK, at " + formatSeconds(state.timeSinceNucS);
+      $("signalOut").textContent = data.signalMk.toFixed(0);
+      $("signalDetail").textContent = state.applyOpticalTransmission ? "delta-T x atmosphere x optics" : "delta-T x atmosphere only";
+      $("snrOut").textContent = data.snr.toFixed(1);
+      $("ttfOut").textContent = formatSeconds(data.timeToThreshold);
+      $("nucOut").textContent = formatSeconds(data.timeToThreshold);
+
+      const thresholdText = Number.isFinite(data.timeToThreshold) ? `The selected SNR requirement is crossed at about ${formatSeconds(data.timeToThreshold)} after NUC. This is not catastrophic detector failure; it is the point where the selected mission SNR margin is no longer met.` : "No threshold crossing within mission duration.";
+      $("nucExplanation").textContent = `The calibration / NUC interval depends on initial NETD, residual FPN, drift coefficient, drift model, target contrast, atmosphere, frame averaging, and required SNR threshold. ${thresholdText}`;
+
+      const maxNetd = data.signalMk / state.snrThreshold;
+      const thermalFpn = Math.pow(state.netdInitialMk, 2) / state.framesAveraged + Math.pow(state.residualFpnMk, 2);
+      const driftAllowance = Math.sqrt(Math.max(0, maxNetd * maxNetd - thermalFpn));
+      const multiplier = state.atmosphericTransmission * (state.applyOpticalTransmission ? state.opticalTransmission : 1);
+      const requiredDeltaT = multiplier > 0 ? state.snrThreshold * data.netd / (1000 * multiplier) : Infinity;
+      const missionMaxDrift = Math.sqrt(Math.max(0, maxNetd * maxNetd - thermalFpn));
+      const maxCoeff = maxCoeffForMission(state, missionMaxDrift);
+      $("snrMarginOut").textContent = (data.snr / state.snrThreshold).toFixed(2) + "x";
+      $("maxNetdOut").textContent = maxNetd.toFixed(1) + " mK";
+      $("driftAllowanceOut").textContent = driftAllowance.toFixed(1) + " mK";
+      $("requiredDeltaTOut").textContent = Number.isFinite(requiredDeltaT) ? requiredDeltaT.toFixed(2) + " K" : "-";
+      $("requiredCoeffOut").textContent = Number.isFinite(maxCoeff) ? maxCoeff.toFixed(1) + " mK" : state.driftModel === "measuredTable" ? "table-specific" : "-";
+      $("physicalInterpretation").innerHTML = physicalInterpretationBullets(state, data, { driftAllowance, maxNetd, requiredDeltaT, maxCoeff }).map(text => `<li>${escapeHtml(text)}</li>`).join("");
+
+      $("driTable").innerHTML = data.tasks.map(task => `<tr><td>${task.key}</td><td>${task.px.toFixed(1)}</td><td>${formatMeters(task.nominal)}</td><td>${formatMeters(task.effective)}</td></tr>`).join("");
+      $("detailTable").innerHTML = [
+        ["Target critical dimension", data.criticalM.toFixed(2) + " m (" + state.criticalDimension + ")"],
+        ["Drift at selected time", driftMk(state, state.timeSinceNucS).toFixed(1) + " mK"],
+        ["Optical transmission", state.opticalTransmission.toFixed(2) + (state.applyOpticalTransmission ? " (applied)" : " (not applied)")],
+        ["1/f discussion terms", state.kneeHz.toFixed(3) + " Hz knee, " + state.lowFreqObservationS.toFixed(0) + " s observation, " + state.highFreqCutoffHz.toFixed(1) + " Hz bandwidth"],
+        ["Frames averaged", state.framesAveraged.toFixed(0)],
+        ["Tracking jitter estimate", Number.isFinite(data.trackingJitter) ? data.trackingJitter.toFixed(3) + " px" : "-"],
+        ["Time threshold meaning", "SNR requirement crossing, not catastrophic failure"],
+        ["Drift model", driftModelName(state)]
+      ].map(row => `<tr><td>${row[0]}</td><td>${row[1]}</td></tr>`).join("");
+
+      const passSNRNow = data.snr >= state.snrThreshold;
+      const passDuration = data.timeToThreshold === Infinity || data.timeToThreshold >= state.missionDurationS;
+      const passTrack = data.trackingJitter <= state.trackingJitterPx;
+      const status = $("missionStatus");
+      status.classList.toggle("fail", !passSNRNow);
+      status.classList.toggle("warn", passSNRNow && (!passDuration || !passTrack));
+      let title = "Mission pass for selected threshold";
+      let reason = "SNR remains above threshold through the full mission and tracking jitter is under the selected limit.";
+      if (!passSNRNow) {
+        title = "Mission fail at selected time";
+        reason = "SNR is below the selected requirement at the current time since NUC.";
+      } else if (!passDuration) {
+        title = "Mission caution: threshold crossing before mission end";
+        reason = `SNR is acceptable now, but crosses the selected threshold at about ${formatSeconds(data.timeToThreshold)}.`;
+      } else if (!passTrack) {
+        title = "Mission caution: tracking jitter exceeds limit";
+        reason = "SNR is acceptable, but the simplified tracking jitter estimate exceeds the selected pixel threshold.";
+      }
+      $("statusTitle").textContent = title;
+      const capable = data.tasks.filter(t => t.effective > 0 && passSNRNow).map(t => t.key.toLowerCase());
+      const best = capable.length ? capable[capable.length - 1] : "not SNR-limited detection";
+      $("interpretation").textContent = `At ${formatSeconds(state.timeSinceNucS)} since NUC, this sensor is ${best}-capable by the selected SNR threshold. ${reason} The threshold time is a mission-utility boundary, not a statement that the detector has failed.`;
+
+      plotLine($("netdChart"), data, state, p => p.netd, "#236b5d", axisScale(data.points.map(p => p.netd)), "mK");
+      plotLine($("snrChart"), data, state, p => p.snr, "#236b5d", axisScale([...data.points.map(p => p.snr), state.snrThreshold]), "SNR", state.snrThreshold, "selected SNR threshold");
+      plotLine($("marginChart"), data, state, p => p.margin, "#236b5d", axisScale([...data.points.map(p => p.margin), 1]), "margin", 1, "margin = 1");
+      plotRangeChart($("rangeChart"), data, state);
+      plotPixels($("pixelsChart"), data);
+      plotMissionMap($("mapChart"), data, state);
+    }
+
+    function exportJson() {
+      const json = JSON.stringify(getState(), null, 2);
+      $("jsonBox").value = json;
+      navigator.clipboard?.writeText(json).catch(() => {});
+      $("jsonError").textContent = "Current assumptions JSON is ready in the text area.";
+      document.querySelector('[data-tab="io"]').click();
+    }
+
+    function importJson() {
+      try {
+        const parsed = JSON.parse($("jsonBox").value);
+        setState({ ...defaults, ...parsed });
+        $("jsonError").textContent = "Imported assumptions. Missing fields were filled with current defaults.";
+      } catch (err) {
+        $("jsonError").textContent = "Could not parse JSON: " + err.message;
+      }
+    }
+
+    ids.forEach((id) => {
+      const el = $(id);
+      if (!el) return;
+      if (el.type === "checkbox") el.checked = Boolean(defaults[id]); else el.value = defaults[id];
+      el.addEventListener("input", () => {
+        if (id === "targetType" && targetPresets[el.value]) {
+          $("targetWidthM").value = targetPresets[el.value].targetWidthM;
+          $("targetHeightM").value = targetPresets[el.value].targetHeightM;
+        }
+        if ((id === "targetWidthM" || id === "targetHeightM") && $("targetType").value !== "custom") $("targetType").value = "custom";
+        update();
+      });
+      el.addEventListener("change", update);
+    });
+
+    document.querySelectorAll(".tab").forEach(button => {
+      button.addEventListener("click", () => {
+        document.querySelectorAll(".tab").forEach(b => b.classList.remove("active"));
+        document.querySelectorAll(".tab-panel").forEach(p => p.classList.remove("active"));
+        button.classList.add("active");
+        $("tab-" + button.dataset.tab).classList.add("active");
+      });
+    });
+
+    document.querySelectorAll("[data-preset]").forEach(button => {
+      button.addEventListener("click", () => {
+        setState({ ...getState(), ...scenarioPresets[button.dataset.preset] });
+      });
+    });
+
+    $("resetBtn").addEventListener("click", () => setState(defaults));
+    $("exportBtn").addEventListener("click", exportJson);
+    $("copyBtn").addEventListener("click", exportJson);
+    $("importBtn").addEventListener("click", importJson);
+    window.addEventListener("resize", update);
+    update();
+  </script>
+</body>
+</html>
